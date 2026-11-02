@@ -352,7 +352,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   // before tag-specific branches emit any content or metadata.
   CssStyle cssStyle;
   if (self->cssParser) {
-    cssStyle = self->cssParser->resolveStyle(name, classAttr);
+    cssStyle = self->cssParser->resolveStyle(name, classAttr, self->verticalMode);
     if (!styleAttr.empty()) {
       CssStyle inlineStyle = CssParser::parseInlineStyle(styleAttr);
       cssStyle.applyOver(inlineStyle);
@@ -426,7 +426,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
       // Skip image if CSS display:none
       if (self->cssParser) {
-        CssStyle imgDisplayStyle = self->cssParser->resolveStyle("img", classAttr);
+        CssStyle imgDisplayStyle = self->cssParser->resolveStyle("img", classAttr, self->verticalMode);
         if (!styleAttr.empty()) {
           imgDisplayStyle.applyOver(CssParser::parseInlineStyle(styleAttr));
         }
@@ -492,7 +492,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 int displayWidth = 0;
                 int displayHeight = 0;
                 const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
-                CssStyle imgStyle = self->cssParser ? self->cssParser->resolveStyle("img", classAttr) : CssStyle{};
+                CssStyle imgStyle =
+                    self->cssParser ? self->cssParser->resolveStyle("img", classAttr, self->verticalMode) : CssStyle{};
                 // Merge inline style (e.g. style="height: 2em") so it overrides stylesheet rules
                 if (!styleAttr.empty()) {
                   imgStyle.applyOver(CssParser::parseInlineStyle(styleAttr));
@@ -884,7 +885,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
     // Default margins when CSS does not specify them
     const int bodyLineHeight = self->renderer.getLineHeight(self->fontId);
-    if (!cssStyle.hasMarginTop()) {
+    // 縦組みの marginTop は列頭の字下げになるので、横組み用の既定の上アキは入れない
+    if (!cssStyle.hasMarginTop() && !self->verticalMode) {
       headerBlockStyle.marginTop = static_cast<int16_t>(bodyLineHeight * 3 / 4);
     }
     if (!cssStyle.hasMarginBottom()) {

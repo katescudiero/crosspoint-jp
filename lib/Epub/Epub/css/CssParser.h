@@ -25,7 +25,7 @@ class CssSelectorUsage;
  *   - Grouped: selector1, selector2 { }
  *
  * Not supported (silently ignored):
- *   - Descendant/child selectors
+ *   - Descendant/child selectors (except ".vrtl .x")
  *   - Pseudo-classes and pseudo-elements
  *   - Media queries (content is skipped)
  *   - @import, @font-face, etc.
@@ -33,7 +33,7 @@ class CssSelectorUsage;
 class CssParser {
  public:
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
-  static constexpr uint8_t CSS_CACHE_VERSION = 5;
+  static constexpr uint8_t CSS_CACHE_VERSION = 6;
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;
@@ -61,7 +61,8 @@ class CssParser {
    * @param classAttr The class attribute value (may contain multiple space-separated classes)
    * @return Combined style with all applicable rules merged
    */
-  [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr) const;
+  [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
+                                      bool vertical = false) const;
 
   /**
    * Parse an inline style attribute string.

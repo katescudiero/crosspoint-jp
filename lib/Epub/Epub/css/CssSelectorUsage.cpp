@@ -53,7 +53,11 @@ bool CssSelectorUsage::matches(const std::string& selectorKey) const {
   if (overflowed_) {
     return true;
   }
-  const std::string_view key(selectorKey);
+  std::string_view key(selectorKey);
+  // ".vrtl .cls"（CssParser が受ける唯一の祖先つきセレクタ）は後半で判定する
+  if (key.rfind(".vrtl ", 0) == 0) {
+    key.remove_prefix(6);
+  }
   const size_t dot = key.find('.');
   if (dot == std::string_view::npos) {
     return containsTag(key);

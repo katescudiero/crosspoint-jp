@@ -395,12 +395,30 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
     }
   }
 
-  // Compute first-line indent for vertical mode (same conditions as horizontal).
-  int verticalIndent = 0;
-  if (firstLineIndent && blockStyle.textIndent == 0 && !blockStyle.textIndentDefined &&
-      !startsWithIdeographicSpace(words) &&
-      (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
-    verticalIndent = cjkCharAdvance > 0 ? cjkCharAdvance : lineHeight;
+  // 列頭・列末の余白。縦組みの margin-top / padding-top は列の頭の字下げ、margin-bottom /
+  // padding-bottom は列末の字上げになる（岩波文庫の .start-Nem / .end-Nem など）。
+  // 字下げで列が潰れないよう、字を 2 つ置けないほど大きい指定は無視する。
+  int topInset = std::max(0, blockStyle.marginTop + blockStyle.paddingTop);
+  int bottomInset = std::max(0, blockStyle.marginBottom + blockStyle.paddingBottom);
+  if (topInset + bottomInset + cjkCharAdvance * 2 > columnHeight) {
+    topInset = 0;
+    bottomInset = 0;
+  }
+  const int usableHeight = static_cast<int>(columnHeight) - topInset - bottomInset;
+
+  // 段落の最初の列だけにかかる字下げ（topInset からの相対）。
+  // - text-indent が指定されていればその値（負ならぶら下げ: 1 列目だけ topInset より上から始まる）
+  // - 無指定なら、横組みと同じ条件で全角 1 字ぶんの自動字下げ
+  // 途中 flush で残した列を次の呼び出しで組み直すときは、すでに 1 列目は済んでいるので付けない。
+  int firstOffset = 0;
+  if (!verticalFirstColumnDone) {
+    if (blockStyle.textIndentDefined && blockStyle.textIndent != 0) {
+      firstOffset = std::max(-topInset, std::min<int>(blockStyle.textIndent, usableHeight / 2));
+    } else if (firstLineIndent && blockStyle.textIndent == 0 && !blockStyle.textIndentDefined &&
+               !startsWithIdeographicSpace(words) &&
+               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
+      firstOffset = cjkCharAdvance > 0 ? cjkCharAdvance : lineHeight;
+    }
   }
 
   // 禁則処理で参照する継続フラグ。wordContinues と同じ内容だが、
@@ -412,9 +430,9 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
   std::vector<size_t> columnEnds;
   {
     size_t columnStart = 0;
-    int currentY = verticalIndent;
+    int currentY = firstOffset;
     for (size_t i = 0; i < words.size(); i++) {
-      if (currentY + wordHeights[i] > columnHeight && i > columnStart) {
+      if (currentY + wordHeights[i] > usableHeight && i > columnStart) {
         // 禁則処理（追い出し）。行頭禁則・行末禁則・分離禁止を収束するまで交互に見る。
         const size_t breakAt = Kinsoku::adjustBreak(words, continuesVec, i, columnStart);
         columnEnds.push_back(breakAt);
@@ -439,7 +457,7 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
   const size_t emitCols = (includeLastColumn || totalCols <= 1) ? totalCols : totalCols - 1;
 
   // Second pass: emit columns up to emitCols.
-  bool isFirstColumn = true;
+  bool isFirstColumn = !verticalFirstColumnDone;
   size_t emitStart = 0;
   for (size_t i = 0; i < emitCols; i++) {
     const size_t start = emitStart;
@@ -454,7 +472,7 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
     colYpos.reserve(count);
     colXpos.resize(count, 0);
 
-    int y = isFirstColumn ? verticalIndent : 0;
+    int y = topInset + (isFirstColumn ? firstOffset : 0);
     for (size_t j = start; j < end; j++) {
       colYpos.push_back(static_cast<int16_t>(y));
       y += wordHeights[j];
@@ -463,6 +481,7 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
     processColumn(std::make_shared<TextBlock>(std::move(colWords), std::move(colXpos), std::move(colStyles), blockStyle,
                                               std::move(colYpos), true, std::move(colRubyTexts)));
     isFirstColumn = false;
+    verticalFirstColumnDone = true;
     emitStart = end;
   }
 

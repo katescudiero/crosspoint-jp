@@ -469,8 +469,15 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
     // At the moment, we only ever check for `tag`, `tag.class1` or `.class1`
     // If the selector has whitespace in it, then it's either a CSS selector for a descendant element (e.g. `tag1 tag2`)
     // or some other slightly more advanced CSS selector which we don't support yet
+    // 例外として、縦組みクラス直下の単純セレクタ（".vrtl .start-1em" など）は受ける。岩波文庫のような
+    // 縦組み EPUB は字下げ・字上げをこの形で書いており、読み飛ばすと本全体で字下げが効かない。
+    // 横組みクラス（.hltr）側は読まない: 縦組みの本ではほぼ使われず、1000 件規模の規則が
+    // 解析中のヒープを圧迫するだけになるため。
     if (key.find(' ') != std::string_view::npos) {
-      continue;
+      const bool writingClassPrefixed = key.rfind(".vrtl ", 0) == 0 && key.find(' ', 6) == std::string_view::npos;
+      if (!writingClassPrefixed) {
+        continue;
+      }
     }
 
     // Skip if this would exceed the rule limit
@@ -649,7 +656,7 @@ bool CssParser::loadFromStream(FsFile& source) {
 
 // Style resolution
 
-CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& classAttr) const {
+CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& classAttr, const bool vertical) const {
   static bool lowHeapWarningLogged = false;
   if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_CSS) {
     if (!lowHeapWarningLogged) {
@@ -680,6 +687,13 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
       if (classIt != rulesBySelector_.end()) {
         result.applyOver(classIt->second);
       }
+      // ".vrtl .cls"：縦組みのときだけ重ねる（祖先つきのぶん優先度が高い）
+      if (vertical) {
+        auto wmIt = rulesBySelector_.find(".vrtl " + classKey);
+        if (wmIt != rulesBySelector_.end()) {
+          result.applyOver(wmIt->second);
+        }
+      }
     }
 
     // TODO: Support combinations of classes (e.g. style on p.class1.class2)
@@ -690,6 +704,12 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
       auto combinedIt = rulesBySelector_.find(combinedKey);
       if (combinedIt != rulesBySelector_.end()) {
         result.applyOver(combinedIt->second);
+      }
+      if (vertical) {
+        auto wmCombinedIt = rulesBySelector_.find(".vrtl " + combinedKey);
+        if (wmCombinedIt != rulesBySelector_.end()) {
+          result.applyOver(wmCombinedIt->second);
+        }
       }
     }
   }
