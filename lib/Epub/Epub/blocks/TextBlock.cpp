@@ -172,7 +172,7 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
       } else if (isSingleCjk) {
         renderer.drawTextVertical(wordFontId, wx, wy, w, true, currentStyle);
       } else {
-        if (VerticalTextUtils::isTateChuYokoWord(w)) {
+        if ((currentStyle & EpdFontFamily::SIDEWAYS_LATIN) == 0 && VerticalTextUtils::isTateChuYokoWord(w)) {
           // TateChuYoko: draw horizontally, centered in the column
           // getTextAdvanceX は SD カードフォントの advance テーブルに無い字だと 0 を返す
           // （GfxRenderer::getTextAdvanceX の NotCached）。0 のまま中央寄せすると
@@ -206,7 +206,8 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
       // 傍線（下線・リンク）。縦書きでは字の右側に縦線を引く。ルビ・傍点と同じ側。
       // 同じ列で次の語も下線付きなら、字間のアキを埋めて 1 本につなげる。
       if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-        const bool latinSideways = !isSingleCjk && !VerticalTextUtils::isTateChuYokoWord(w);
+        const bool latinSideways = !isSingleCjk && ((currentStyle & EpdFontFamily::SIDEWAYS_LATIN) != 0 ||
+                                                    !VerticalTextUtils::isTateChuYokoWord(w));
         int wordLen = latinSideways ? renderer.getTextAdvanceX(wordFontId, w, currentStyle) : columnWidth;
         if (wordLen <= 0) wordLen = columnWidth;
         int lineBottom = wy + wordLen;

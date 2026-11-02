@@ -343,6 +343,34 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
 
   const int lineHeight = renderer.getLineHeight(fontId);
 
+  // 英文の中の英字 1 字（冠詞の "A"、代名詞の "I" など）は、縦中横にせず前後の英単語と同じく
+  // 横倒しにする。縦中横にするのは「A型」のように日本語に挟まれた 1 字だけ。
+  // 判定は隣の語が 2 字以上の英単語（Sideways で英字を含む）かどうか。描画側（TextBlock）は
+  // 隣の語を見られない（列ごとに TextBlock が分かれる）ので、判定結果は語のスタイルの
+  // SIDEWAYS_LATIN ビットに持たせる。何度呼んでも同じ結果になる。
+  if (wordVerticalBehaviors.size() >= words.size()) {
+    auto isLatinPhraseWord = [this](const size_t j) {
+      if (wordVerticalBehaviors[j] != VerticalTextUtils::VerticalBehavior::Sideways || words[j].size() < 2) {
+        return false;
+      }
+      for (const char c : words[j]) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return true;
+      }
+      return false;
+    };
+    for (size_t i = 0; i < words.size(); i++) {
+      if (wordVerticalBehaviors[i] != VerticalTextUtils::VerticalBehavior::TateChuYoko || words[i].size() != 1) {
+        continue;
+      }
+      const char c = words[i][0];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) continue;
+      if ((i > 0 && isLatinPhraseWord(i - 1)) || (i + 1 < words.size() && isLatinPhraseWord(i + 1))) {
+        wordVerticalBehaviors[i] = VerticalTextUtils::VerticalBehavior::Sideways;
+        wordStyles[i] = static_cast<EpdFontFamily::Style>(wordStyles[i] | EpdFontFamily::SIDEWAYS_LATIN);
+      }
+    }
+  }
+
   // Compute CJK character advance once from the first Upright word.
   // This is used as the reference cell height for TateChuYoko and spacing.
   // Cannot use a hardcoded reference char ("一") because it may not be in the advance table.
