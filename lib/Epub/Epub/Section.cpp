@@ -31,7 +31,8 @@ namespace {
 //             <pre> の枠の上辺・下辺を折り返した行に引かない、ぶら下げ幅の補正を textIndent だけに。
 // Version 42: <pre> の上下のアキを最初の行と最後の行だけに寄せる（CSS の padding が行ごとに
 //             掛かって 1 行おきに空き、枠が途切れていた）。同じくレイアウト結果のみの変更。
-constexpr uint8_t SECTION_FILE_VERSION = 42;
+// Version 43: 縦書きのローマ数字・囲み数字を1字ずつの正立語にする（語の分割と向きが変わる）。
+constexpr uint8_t SECTION_FILE_VERSION = 43;
 // Minimum free heap required before attempting to build section pages.
 // Section building involves heavy allocations (Page, TextBlock, PageLine, etc.)
 // and on ESP32 without C++ exceptions, allocation failure calls abort().
