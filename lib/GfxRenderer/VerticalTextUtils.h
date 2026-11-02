@@ -20,6 +20,25 @@ inline bool isUprightSymbolInVertical(uint32_t cp) {
   return false;
 }
 
+// 縦書きでは「全角1字ぶんの枠を保ったまま、字形だけ90°右に倒して」組む記号。
+// 横書き用の字形のまま正立させると、等号が横線のまま・波ダッシュが横波のままになり、
+// 縦書きの流れの中で倒れて見える（JIS X 4051 の縦組みでは回転して組む字）。
+// パーサの語分割（1字ずつ・Upright の枠）は変えず、描画だけ回転に切り替える。
+// 'vert' 字形を持つフォントに依存しないよう、回転は drawTextSideways で行う。
+inline bool isRotatedInVertical(uint32_t cp) {
+  switch (cp) {
+    case 0x301C:  // 〜 波ダッシュ
+    case 0xFF0B:  // ＋
+    case 0xFF0D:  // －
+    case 0xFF1C:  // ＜
+    case 0xFF1D:  // ＝
+    case 0xFF1E:  // ＞
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Determine if a codepoint should be drawn upright in vertical text.
 // CJK ideographs, kana, CJK symbols, fullwidth forms, etc.
 inline bool isUprightInVertical(uint32_t cp) {
