@@ -57,6 +57,10 @@ class ChapterHtmlSlimParser {
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
   int16_t currentPageNextX = 0;  // vertical mode: next column x position (decreases right-to-left)
+  // 縦組みの列間のアキ（CSS の margin/padding-right・left）。ブロックの前（右）側は列を置く前に、
+  // 後ろ（左）側は次のブロックの前側と重ねて（大きいほう）次の列の位置に反映する。
+  int16_t verticalPendingGapAfter = 0;
+  bool verticalGapBeforeDone = false;
   // Ruby text state
   bool inRuby = false;
   int rubyStartWordIndex = -1;
@@ -144,6 +148,7 @@ class ChapterHtmlSlimParser {
   void startNewTextBlock(const BlockStyle& blockStyle);
   void flushPartWordBuffer();
   void flushCurrentBlockMidPage();
+  void applyVerticalLeadingGap();
   void makePages();
   void flushTableAsGrid();
   // XML callbacks

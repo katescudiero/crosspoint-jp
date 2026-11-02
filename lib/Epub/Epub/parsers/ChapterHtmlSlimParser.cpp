@@ -8,6 +8,8 @@
 #include <Utf8.h>
 #include <expat.h>
 
+#include <algorithm>
+
 #include "../../Epub.h"
 #include "../InlineImage.h"
 #include "../Page.h"
@@ -296,6 +298,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   }
   currentTextBlock.reset(new ParsedText(hyphenationEnabled, blockStyle, firstLineIndent));
   wordsExtractedInBlock = 0;
+  verticalGapBeforeDone = false;
 }
 
 void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
@@ -889,7 +892,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     if (!cssStyle.hasMarginTop() && !self->verticalMode) {
       headerBlockStyle.marginTop = static_cast<int16_t>(bodyLineHeight * 3 / 4);
     }
-    if (!cssStyle.hasMarginBottom()) {
+    if (!cssStyle.hasMarginBottom() && !self->verticalMode) {
       headerBlockStyle.marginBottom = static_cast<int16_t>(bodyLineHeight / 4);
     }
 
@@ -1367,12 +1370,27 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   }
 }
 
+// 縦組みで、ブロックの最初の列を置く前に列間のアキを入れる。
+// 縦組みの margin-right / padding-right はブロックの前（右）側、margin-left / padding-left は
+// 後ろ（左）側のアキ（見出しの前後を空ける .ko-midashi など）。直前のブロックの後ろ側のアキとは
+// 足さずに大きいほうだけ取る（CSS の隣接マージンの相殺と同じ）。ページの先頭では入れない。
+void ChapterHtmlSlimParser::applyVerticalLeadingGap() {
+  if (!verticalMode || verticalGapBeforeDone || !currentTextBlock) return;
+  verticalGapBeforeDone = true;
+  const int before = std::max(0, static_cast<int>(currentTextBlock->getBlockStyle().rightInset()));
+  const int gap = std::max(before, static_cast<int>(verticalPendingGapAfter));
+  verticalPendingGapAfter = 0;
+  if (gap <= 0 || !currentPage || currentPage->elements.empty()) return;
+  currentPageNextX = static_cast<int16_t>(std::max(0, currentPageNextX - gap));
+}
+
 // Mid-block flush: 現在の text block を layout に流し込み、消費済み単語を erase する。
 // characterData のループ内でも呼ばれるため、境界での partial column を残す (includeLast=false)。
 void ChapterHtmlSlimParser::flushCurrentBlockMidPage() {
   if (!currentTextBlock || currentTextBlock->isEmpty()) return;
 
   if (verticalMode) {
+    applyVerticalLeadingGap();
     currentTextBlock->layoutVerticalColumns(
         renderer, fontId, viewportHeight,
         [this](const std::shared_ptr<TextBlock>& textBlock) { addLineToPage(textBlock); }, false);
@@ -2021,9 +2039,11 @@ void ChapterHtmlSlimParser::makePages() {
 
   const int layoutFontId = (blockStyle.fontId != 0) ? blockStyle.fontId : fontId;
   if (verticalMode) {
+    applyVerticalLeadingGap();
     currentTextBlock->layoutVerticalColumns(
         renderer, layoutFontId, viewportHeight,
         [this](const std::shared_ptr<TextBlock>& textBlock) { addLineToPage(textBlock); });
+    verticalPendingGapAfter = static_cast<int16_t>(std::max(0, static_cast<int>(blockStyle.leftInset())));
   } else {
     currentTextBlock->layoutAndExtractLines(
         renderer, layoutFontId, effectiveWidth,
