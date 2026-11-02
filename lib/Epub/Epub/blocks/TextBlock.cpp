@@ -161,7 +161,11 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
       } else {
         if (VerticalTextUtils::isTateChuYokoWord(w)) {
           // TateChuYoko: draw horizontally, centered in the column
-          const int textW = renderer.getTextAdvanceX(wordFontId, w, currentStyle);
+          // getTextAdvanceX は SD カードフォントの advance テーブルに無い字だと 0 を返す
+          // （GfxRenderer::getTextAdvanceX の NotCached）。0 のまま中央寄せすると
+          // 字が列の中心から右へ半字ぶんずれるので、字形側の幅で計り直す。
+          int textW = renderer.getTextAdvanceX(wordFontId, w, currentStyle);
+          if (textW <= 0) textW = renderer.getTextWidth(wordFontId, w, currentStyle);
           const int centerOffset = (columnWidth - textW) / 2;
           renderer.drawText(wordFontId, wx + centerOffset, wy, w, true, currentStyle);
         } else {
