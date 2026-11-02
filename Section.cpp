@@ -1,0 +1,395 @@
+#include "Section.h"
+
+#include <Arduino.h>
+#include <HalStorage.h>
+#include <Logging.h>
+#include <Serialization.h>
+
+#include "Epub/css/CssParser.h"
+#include "Epub/css/CssSelectorUsage.h"
+#include "Page.h"
+#include "SectionBuildPerf.h"
+#include "hyphenation/Hyphenator.h"
+#include "parsers/ChapterHtmlSlimParser.h"
+
+namespace {
+// Version 31: ruby text data added to TextBlock serialization.
+// Version 33: U+3000（全角スペース）を語として保持し、段落頭の U+3000 では自動インデントを
+//             重ねない。バイナリ構造は不変だがレイアウト結果が変わるので再生成させる。
+// Version 34: 縦書きの本文中画像をインライン語／列を消費するブロックとして配置（#107）。
+//             同じくレイアウト結果のみの変更。
+// Version 35: 横書きにも禁則処理（行頭禁則・行末禁則・分離禁止）を適用し、縦書きの禁則文字も
+//             JIS X 4051 準拠に拡張。同じくレイアウト結果のみの変更。
+// Version 36: <ol> の項目に連番マーカーを振り、入れ子リストを字下げする。
+//             同じくレイアウト結果のみの変更。
+// Version 37: <hr> の区切り線、<sup>/<sub> を小さいフォントで描画、CJK どうしの字間を
+//             原文に空白があるときだけ空ける。均等割りも空白を取り置いてから配る。
+// Version 38: <pre> の空白・改行の保持とコードブロックの枠線（BlockStyle に枠の情報を追加）。
+// Version 39: リスト項目のぶら下げ幅をマーカー語の実測幅に合わせる（折り返し位置が変わる）。
+// Version 40: 見出しブロックに段落の追加アキを入れない（BlockStyle に isHeading を追加）。
+// Version 41: コードレビューの指摘反映。原文の改行を語間にしない（CSS Text のセグメント改行）、
+//             <pre> の枠の上辺・下辺を折り返した行に引かない、ぶら下げ幅の補正を textIndent だけに。
+// Version 42: <pre> の上下のアキを最初の行と最後の行だけに寄せる（CSS の padding が行ごとに
+//             掛かって 1 行おきに空き、枠が途切れていた）。同じくレイアウト結果のみの変更。
+// Version 43: 縦書きのローマ数字・囲み数字を1字ずつの正立語にする（語の分割と向きが変わる）。
+constexpr uint8_t SECTION_FILE_VERSION = 43;
+// Minimum free heap required before attempting to build section pages.
+// Section building involves heavy allocations (Page, TextBlock, PageLine, etc.)
+// and on ESP32 without C++ exceptions, allocation failure calls abort().
+constexpr size_t MIN_FREE_HEAP_FOR_SECTION_BUILD = 50 * 1024;  // 50KB
+constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
+                                 sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
+                                 sizeof(bool) + sizeof(uint8_t) + sizeof(bool) + sizeof(uint8_t) +  // charSpacing
+                                 sizeof(uint32_t) + sizeof(uint32_t);
+}  // namespace
+
+uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
+  if (!file) {
+    LOG_ERR("SCT", "File not open for writing page %d", pageCount);
+    return 0;
+  }
+
+  const uint32_t position = file.position();
+  bool serialized;
+  {
+    SECTION_PERF_SCOPE(serializeUs);
+    serialized = page->serialize(file);
+  }
+  if (!serialized) {
+    LOG_ERR("SCT", "Failed to serialize page %d", pageCount);
+    return 0;
+  }
+  LOG_DBG("SCT", "Page %d processed", pageCount);
+
+  pageCount++;
+  return position;
+}
+
+void Section::writeSectionFileHeader(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                                     const uint8_t paragraphAlignment, const uint16_t viewportWidth,
+                                     const uint16_t viewportHeight, const bool hyphenationEnabled,
+                                     const bool firstLineIndent, const bool embeddedStyle, const uint8_t imageRendering,
+                                     const bool verticalMode, const uint8_t charSpacing) {
+  if (!file) {
+    LOG_DBG("SCT", "File not open for writing header");
+    return;
+  }
+  static_assert(HEADER_SIZE == sizeof(SECTION_FILE_VERSION) + sizeof(fontId) + sizeof(lineCompression) +
+                                   sizeof(extraParagraphSpacing) + sizeof(paragraphAlignment) + sizeof(viewportWidth) +
+                                   sizeof(viewportHeight) + sizeof(pageCount) + sizeof(hyphenationEnabled) +
+                                   sizeof(firstLineIndent) + sizeof(embeddedStyle) + sizeof(imageRendering) +
+                                   sizeof(verticalMode) + sizeof(charSpacing) + sizeof(uint32_t) + sizeof(uint32_t),
+                "Header size mismatch");
+  serialization::writePod(file, SECTION_FILE_VERSION);
+  serialization::writePod(file, fontId);
+  serialization::writePod(file, lineCompression);
+  serialization::writePod(file, extraParagraphSpacing);
+  serialization::writePod(file, paragraphAlignment);
+  serialization::writePod(file, viewportWidth);
+  serialization::writePod(file, viewportHeight);
+  serialization::writePod(file, hyphenationEnabled);
+  serialization::writePod(file, firstLineIndent);
+  serialization::writePod(file, embeddedStyle);
+  serialization::writePod(file, imageRendering);
+  serialization::writePod(file, verticalMode);
+  serialization::writePod(file, charSpacing);
+  serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
+  serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
+  serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
+}
+
+bool Section::loadSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                              const uint8_t paragraphAlignment, const uint16_t viewportWidth,
+                              const uint16_t viewportHeight, const bool hyphenationEnabled, const bool firstLineIndent,
+                              const bool embeddedStyle, const uint8_t imageRendering, const bool verticalMode,
+                              const uint8_t charSpacing) {
+  if (!Storage.openFileForRead("SCT", filePath, file)) {
+    return false;
+  }
+
+  // Match parameters
+  {
+    uint8_t version;
+    serialization::readPod(file, version);
+    if (version != SECTION_FILE_VERSION) {
+      file.close();
+      LOG_ERR("SCT", "Deserialization failed: Unknown version %u", version);
+      clearCache();
+      return false;
+    }
+
+    int fileFontId;
+    uint16_t fileViewportWidth, fileViewportHeight;
+    float fileLineCompression;
+    bool fileExtraParagraphSpacing;
+    uint8_t fileParagraphAlignment;
+    bool fileHyphenationEnabled;
+    bool fileFirstLineIndent;
+    bool fileEmbeddedStyle;
+    uint8_t fileImageRendering;
+    bool fileVerticalMode;
+    uint8_t fileCharSpacing;
+    serialization::readPod(file, fileFontId);
+    serialization::readPod(file, fileLineCompression);
+    serialization::readPod(file, fileExtraParagraphSpacing);
+    serialization::readPod(file, fileParagraphAlignment);
+    serialization::readPod(file, fileViewportWidth);
+    serialization::readPod(file, fileViewportHeight);
+    serialization::readPod(file, fileHyphenationEnabled);
+    serialization::readPod(file, fileFirstLineIndent);
+    serialization::readPod(file, fileEmbeddedStyle);
+    serialization::readPod(file, fileImageRendering);
+    serialization::readPod(file, fileVerticalMode);
+    serialization::readPod(file, fileCharSpacing);
+
+    if (fontId != fileFontId || lineCompression != fileLineCompression ||
+        extraParagraphSpacing != fileExtraParagraphSpacing || paragraphAlignment != fileParagraphAlignment ||
+        viewportWidth != fileViewportWidth || viewportHeight != fileViewportHeight ||
+        hyphenationEnabled != fileHyphenationEnabled || firstLineIndent != fileFirstLineIndent ||
+        embeddedStyle != fileEmbeddedStyle || imageRendering != fileImageRendering ||
+        verticalMode != fileVerticalMode || charSpacing != fileCharSpacing) {
+      file.close();
+      LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
+      clearCache();
+      return false;
+    }
+  }
+
+  serialization::readPod(file, pageCount);
+  file.close();
+  LOG_DBG("SCT", "Deserialization succeeded: %d pages", pageCount);
+  return true;
+}
+
+// Your updated class method (assuming you are using the 'SD' object, which is a wrapper for a specific filesystem)
+bool Section::clearCache() const {
+  if (!Storage.exists(filePath.c_str())) {
+    LOG_DBG("SCT", "Cache does not exist, no action needed");
+    return true;
+  }
+
+  if (!Storage.remove(filePath.c_str())) {
+    LOG_ERR("SCT", "Failed to clear cache");
+    return false;
+  }
+
+  LOG_DBG("SCT", "Cache cleared successfully");
+  return true;
+}
+
+bool Section::createSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                                const uint8_t paragraphAlignment, const uint16_t viewportWidth,
+                                const uint16_t viewportHeight, const bool hyphenationEnabled,
+                                const bool firstLineIndent, const bool embeddedStyle, const uint8_t imageRendering,
+                                const bool verticalMode, const uint8_t charSpacing,
+                                const std::function<void()>& popupFn, const int* headingFontIds,
+                                const int tableFontId) {
+  SECTION_PERF_RESET();
+
+  const auto localPath = epub->getSpineItem(spineIndex).href;
+  const auto tmpHtmlPath = epub->getCachePath() + "/.tmp_" + std::to_string(spineIndex) + ".html";
+
+  // Create cache directory if it doesn't exist
+  {
+    const auto sectionsDir = epub->getCachePath() + "/sections";
+    Storage.mkdir(sectionsDir.c_str());
+  }
+
+  // Retry logic for SD card timing issues
+  bool success = false;
+  uint32_t fileSize = 0;
+  SECTION_PERF_BEGIN(extractStartUs);
+  for (int attempt = 0; attempt < 3 && !success; attempt++) {
+    if (attempt > 0) {
+      LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
+      delay(50);  // Brief delay before retry
+    }
+
+    // Remove any incomplete file from previous attempt before retrying
+    if (Storage.exists(tmpHtmlPath.c_str())) {
+      Storage.remove(tmpHtmlPath.c_str());
+    }
+
+    FsFile tmpHtml;
+    if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
+      continue;
+    }
+    success = epub->readItemContentsToStream(localPath, tmpHtml, 1024);
+    fileSize = tmpHtml.size();
+    tmpHtml.close();
+
+    // If streaming failed, remove the incomplete file immediately
+    if (!success && Storage.exists(tmpHtmlPath.c_str())) {
+      Storage.remove(tmpHtmlPath.c_str());
+      LOG_DBG("SCT", "Removed incomplete temp file after failed attempt");
+    }
+  }
+  SECTION_PERF_END(extractStartUs, extractUs);
+  SECTION_PERF_SET(htmlBytes, fileSize);
+
+  if (!success) {
+    LOG_ERR("SCT", "Failed to stream item contents to temp file after retries");
+    return false;
+  }
+
+  LOG_DBG("SCT", "Streamed temp HTML to %s (%d bytes)", tmpHtmlPath.c_str(), fileSize);
+
+  if (!Storage.openFileForWrite("SCT", filePath, file)) {
+    return false;
+  }
+  writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+                         viewportHeight, hyphenationEnabled, firstLineIndent, embeddedStyle, imageRendering,
+                         verticalMode, charSpacing);
+  std::vector<uint32_t> lut = {};
+
+  // Derive the content base directory and image cache path prefix for the parser
+  size_t lastSlash = localPath.find_last_of('/');
+  std::string contentBase = (lastSlash != std::string::npos) ? localPath.substr(0, lastSlash + 1) : "";
+  std::string imageBasePath = epub->getCachePath() + "/img_" + std::to_string(spineIndex) + "_";
+
+  CssParser* cssParser = nullptr;
+  if (embeddedStyle) {
+    cssParser = epub->getCssParser();
+    if (cssParser) {
+      // Load only the cached rules this chapter can actually reference.
+      // Generic publisher stylesheets (e.g. the EBPAJ template) register
+      // hundreds of rules of which a chapter uses a handful; loading them all
+      // costs tens of KB of heap right when section building needs it most
+      // (issue #105). If the scan fails, fall back to loading everything.
+      CssSelectorUsage usage;
+      const bool scanned = usage.scanHtmlFile(tmpHtmlPath);
+      if (!cssParser->loadFromCache(scanned ? &usage : nullptr)) {
+        LOG_ERR("SCT", "Failed to load CSS from cache");
+      }
+    }
+  }
+
+  // Pre-check heap before heavy allocation work.
+  // On ESP32 without C++ exceptions, new/make_shared call abort() on failure.
+  const uint32_t freeHeapBeforeBuild = ESP.getFreeHeap();
+  if (freeHeapBeforeBuild < MIN_FREE_HEAP_FOR_SECTION_BUILD) {
+    LOG_ERR("SCT", "Insufficient heap for section build (%u bytes free, need %zu), aborting gracefully",
+            freeHeapBeforeBuild, MIN_FREE_HEAP_FOR_SECTION_BUILD);
+    file.close();
+    Storage.remove(filePath.c_str());
+    Storage.remove(tmpHtmlPath.c_str());
+    if (cssParser) {
+      cssParser->clear();
+    }
+    return false;
+  }
+
+  ChapterHtmlSlimParser visitor(
+      epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+      viewportHeight, hyphenationEnabled, firstLineIndent,
+      [this, &lut](std::unique_ptr<Page> page) { lut.emplace_back(this->onPageComplete(std::move(page))); },
+      embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, headingFontIds, tableFontId,
+      verticalMode);
+  Hyphenator::setPreferredLanguage(epub->getLanguage());
+  success = visitor.parseAndBuildPages();
+
+  Storage.remove(tmpHtmlPath.c_str());
+  if (!success) {
+    LOG_ERR("SCT", "Failed to parse XML and build pages");
+    file.close();
+    Storage.remove(filePath.c_str());
+    if (cssParser) {
+      cssParser->clear();
+    }
+    return false;
+  }
+
+  const uint32_t lutOffset = file.position();
+  bool hasFailedLutRecords = false;
+  // Write LUT
+  for (const uint32_t& pos : lut) {
+    if (pos == 0) {
+      hasFailedLutRecords = true;
+      break;
+    }
+    serialization::writePod(file, pos);
+  }
+
+  if (hasFailedLutRecords) {
+    LOG_ERR("SCT", "Failed to write LUT due to invalid page positions");
+    file.close();
+    Storage.remove(filePath.c_str());
+    return false;
+  }
+
+  // Write anchor-to-page map for fragment navigation (e.g. footnote targets)
+  const uint32_t anchorMapOffset = file.position();
+  const auto& anchors = visitor.getAnchors();
+  serialization::writePod(file, static_cast<uint16_t>(anchors.size()));
+  for (const auto& [anchor, page] : anchors) {
+    serialization::writeString(file, anchor);
+    serialization::writePod(file, page);
+  }
+
+  // Patch header with final pageCount, lutOffset, and anchorMapOffset
+  file.seek(HEADER_SIZE - sizeof(uint32_t) * 2 - sizeof(pageCount));
+  serialization::writePod(file, pageCount);
+  serialization::writePod(file, lutOffset);
+  serialization::writePod(file, anchorMapOffset);
+  file.close();
+  if (cssParser) {
+    cssParser->clear();
+  }
+  SECTION_PERF_LOG(spineIndex, pageCount, fontId, verticalMode);
+  return true;
+}
+
+std::unique_ptr<Page> Section::loadPageFromSectionFile() {
+  if (!Storage.openFileForRead("SCT", filePath, file)) {
+    return nullptr;
+  }
+
+  file.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
+  uint32_t lutOffset;
+  serialization::readPod(file, lutOffset);
+  file.seek(lutOffset + sizeof(uint32_t) * currentPage);
+  uint32_t pagePos;
+  serialization::readPod(file, pagePos);
+  file.seek(pagePos);
+
+  auto page = Page::deserialize(file);
+  file.close();
+  return page;
+}
+
+std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) const {
+  FsFile f;
+  if (!Storage.openFileForRead("SCT", filePath, f)) {
+    return std::nullopt;
+  }
+
+  const uint32_t fileSize = f.size();
+  f.seek(HEADER_SIZE - sizeof(uint32_t));
+  uint32_t anchorMapOffset;
+  serialization::readPod(f, anchorMapOffset);
+  if (anchorMapOffset == 0 || anchorMapOffset >= fileSize) {
+    f.close();
+    return std::nullopt;
+  }
+
+  f.seek(anchorMapOffset);
+  uint16_t count;
+  serialization::readPod(f, count);
+  for (uint16_t i = 0; i < count; i++) {
+    std::string key;
+    uint16_t page;
+    serialization::readString(f, key);
+    serialization::readPod(f, page);
+    if (key == anchor) {
+      f.close();
+      return page;
+    }
+  }
+
+  f.close();
+  return std::nullopt;
+}
+
+// Paragraph-level KOSync (upstream PR #1686) is not supported in this fork.
+// The section file format here does not carry paragraph indices in its LUT.
+std::optional<uint16_t> Section::getPageForParagraphIndex(uint16_t /*pIndex*/) const { return std::nullopt; }
