@@ -28,6 +28,8 @@ inline bool isUprightSymbolInVertical(uint32_t cp) {
 inline bool isRotatedInVertical(uint32_t cp) {
   switch (cp) {
     case 0x301C:  // 〜 波ダッシュ
+    case 0x3030:  // 〰 波線
+    case 0x30A0:  // ゠ 二重ハイフン（「非゠椅子」のように等号として使われる）
     case 0xFF0B:  // ＋
     case 0xFF0D:  // －
     case 0xFF1C:  // ＜
