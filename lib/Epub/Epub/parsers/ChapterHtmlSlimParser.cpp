@@ -1361,9 +1361,13 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
       for (int j = 0; j < charLen && j < 4; j++) {
         cjkWord[j] = s[i + j];
       }
-      // CJK 字は従来どおり REGULAR で語にする（太字・斜体・下線はここでは付けない）。
-      // 傍点だけは字ごとに打つ必要があるので、EMPHASIS ビットだけ載せる。
-      const auto cjkStyle = self->effectiveEmphasis ? EpdFontFamily::EMPHASIS : EpdFontFamily::REGULAR;
+      // CJK 字は従来どおり REGULAR で語にする（太字・斜体はここでは付けない）。
+      // 傍点・傍線は字ごとに引く必要があるので、そのビットだけ載せる。
+      // 縦書きのときは下線（リンクの傍線など）も載せる。横書きの CJK は従来どおり下線を付けない。
+      auto cjkStyle = self->effectiveEmphasis ? EpdFontFamily::EMPHASIS : EpdFontFamily::REGULAR;
+      if (self->verticalMode && (self->underlineUntilDepth < self->depth || self->effectiveUnderline)) {
+        cjkStyle = static_cast<EpdFontFamily::Style>(cjkStyle | EpdFontFamily::UNDERLINE);
+      }
       if (self->verticalMode) {
         self->currentTextBlock->addWord(cjkWord, cjkStyle, VerticalTextUtils::VerticalBehavior::Upright, false,
                                         self->listMarkerPending, self->pendingSpace);

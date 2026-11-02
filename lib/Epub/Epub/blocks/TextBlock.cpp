@@ -202,6 +202,21 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
         const int cy = wy + columnWidth / 2;
         renderer.fillRect(cx - dot / 2, cy - dot / 2, dot, dot, true);
       }
+
+      // 傍線（下線・リンク）。縦書きでは字の右側に縦線を引く。ルビ・傍点と同じ側。
+      // 同じ列で次の語も下線付きなら、字間のアキを埋めて 1 本につなげる。
+      if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
+        const bool latinSideways = !isSingleCjk && !VerticalTextUtils::isTateChuYokoWord(w);
+        int wordLen = latinSideways ? renderer.getTextAdvanceX(wordFontId, w, currentStyle) : columnWidth;
+        if (wordLen <= 0) wordLen = columnWidth;
+        int lineBottom = wy + wordLen;
+        if (i + 1 < words.size() && i + 1 < wordYpos.size() && wordXpos[i + 1] == wordXpos[i] &&
+            (wordStyles[i + 1] & EpdFontFamily::UNDERLINE) != 0) {
+          lineBottom = y + wordYpos[i + 1];
+        }
+        const int lineX = wx + columnWidth + 1;
+        renderer.drawLine(lineX, wy, lineX, lineBottom, true);
+      }
     } else {
       const int wordX = wordXpos[i] + x;
       renderer.drawText(wordFontId, wordX, y + scriptYOffset, words[i].c_str(), true, currentStyle);
