@@ -400,20 +400,32 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  const int srcWidth = jpeg->getWidth();
-  const int srcHeight = jpeg->getHeight();
+  const int fullWidth = jpeg->getWidth();
+  const int fullHeight = jpeg->getHeight();
 
-  LOG_DBG("JPG", "JPEG dimensions: %dx%d", srcWidth, srcHeight);
+  LOG_DBG("JPG", "JPEG dimensions: %dx%d", fullWidth, fullHeight);
 
   constexpr int MAX_IMAGE_WIDTH = 2048;
   constexpr int MAX_IMAGE_HEIGHT = 3072;
 
-  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > MAX_IMAGE_WIDTH || srcHeight > MAX_IMAGE_HEIGHT) {
-    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", srcWidth, srcHeight, MAX_IMAGE_WIDTH,
+  if (fullWidth <= 0 || fullHeight <= 0 || fullWidth > MAX_IMAGE_WIDTH || fullHeight > MAX_IMAGE_HEIGHT) {
+    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", fullWidth, fullHeight, MAX_IMAGE_WIDTH,
             MAX_IMAGE_HEIGHT);
     jpeg->close();
     delete jpeg;
     return false;
+  }
+
+  // プログレッシブ JPEG は JPEGDEC が DC 成分だけを復号し、出力は常に 1/8 サイズになる
+  // （JpegToFramebufferConverter と同じ扱い。呼び出し側の scale 指定を 1/8 に揃えないと、
+  // コールバックに届く座標が srcWidth と合わず、行が 1 本も書き出されない）。
+  // 以降の変換は、この縮小後の大きさを元画像として扱う。画質は落ちるが表紙は出る。
+  const bool isProgressive = jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE;
+  const int jpegScaleOption = isProgressive ? JPEG_SCALE_EIGHTH : 0;
+  const int srcWidth = isProgressive ? (fullWidth + 7) / 8 : fullWidth;
+  const int srcHeight = isProgressive ? (fullHeight + 7) / 8 : fullHeight;
+  if (isProgressive) {
+    LOG_INF("JPG", "Progressive JPEG detected - decoding DC coefficients only (%dx%d)", srcWidth, srcHeight);
   }
 
   // Calculate output dimensions (pre-scale to fit display exactly)
@@ -526,7 +538,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
   jpeg->setUserPointer(&ctx);
 
-  rc = jpeg->decode(0, 0, 0);
+  rc = jpeg->decode(0, 0, jpegScaleOption);
 
   if (rc != 1 || ctx.error) {
     LOG_ERR("JPG", "JPEG decode failed (rc=%d, err=%d)", rc, jpeg->getLastError());
