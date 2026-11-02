@@ -1318,7 +1318,8 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     // 意味を持つ空白であり、ASCII 空白のように折りたたむと消えてしまう。
     // フォント側に U+3000 のグリフ（空白・全角送り）があることが前提で、
     // SD カードフォント（fontconvert_sdcard.py の cjk 範囲）と内蔵 CJK UI フォントは持っている。
-    if (isCjkCodepointForSplit(cp)) {
+    // 縦書きではローマ数字・囲み数字も1字ずつの正立語にする（横書きの語分割は変えない）。
+    if (isCjkCodepointForSplit(cp) || (self->verticalMode && VerticalTextUtils::isUprightSymbolInVertical(cp))) {
       // CJK character: flush any buffered content first
       if (self->partWordBufferIndex > 0) {
         self->flushPartWordBuffer();
