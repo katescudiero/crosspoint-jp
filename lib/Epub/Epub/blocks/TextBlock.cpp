@@ -5,6 +5,7 @@
 #include <Serialization.h>
 #include <Utf8.h>
 #include <VerticalTextUtils.h>
+
 #include <algorithm>
 
 #include "../InlineImage.h"

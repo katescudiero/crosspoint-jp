@@ -1936,7 +1936,8 @@ void GfxRenderer::drawTextVertical(const int fontId, const int x, const int y, c
     const uint16_t fontScale = getSdCardFontScale(effectiveFontId);
     if (fontScale != 256) advFP = static_cast<int32_t>(static_cast<int64_t>(advFP) * fontScale / 256);
     const int advance = fp4::toPixel(advFP);
-    const int charSpacingPercent = (spacingPercent >= 0) ? spacingPercent : static_cast<int>(verticalCharSpacingPercent_);
+    const int charSpacingPercent =
+        (spacingPercent >= 0) ? spacingPercent : static_cast<int>(verticalCharSpacingPercent_);
     const int verticalAdvance = advance + advance * charSpacingPercent / 100;
 
     // Check for vertical substitute glyph (OpenType 'vert' feature).
