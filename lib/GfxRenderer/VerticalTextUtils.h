@@ -40,6 +40,29 @@ inline void placeRubySpans(RubySpan* spans, int n, int minTop, int gap) {
   }
 }
 
+// 縦書きで「縦中横」（横向きの字形のまま、列の中央に正立）にする語か。
+//  - 半角数字だけの 1〜2 桁（「10」「3」）
+//  - 半角のラテン文字・ギリシャ文字 1 字（「（a）」の a、「μ」など）
+// 3 桁以上の数字（年・ページ番号）や英単語、「A.」のような記号付きは対象外で、従来どおり横倒しにする。
+// 対象の範囲は、この本の CSS が縦中横（.tcy）を付けていた語（1〜2 桁の数字と 1 字の英字）に合わせてある。
+// パーサ（語の分類）と TextBlock（描画）が同じ結果になるよう、判定をここ 1 か所にまとめている。
+// s は UTF-8 で NUL 終端。
+inline bool isTateChuYokoWord(const char* s) {
+  if (s == nullptr || s[0] == '\0') return false;
+  const auto* u = reinterpret_cast<const unsigned char*>(s);
+  if (u[0] >= '0' && u[0] <= '9') {
+    if (u[1] == '\0') return true;
+    return u[1] >= '0' && u[1] <= '9' && u[2] == '\0';
+  }
+  if (u[1] == '\0') return (u[0] >= 'A' && u[0] <= 'Z') || (u[0] >= 'a' && u[0] <= 'z');
+  if ((u[0] == 0xCE || u[0] == 0xCF) && (u[1] & 0xC0) == 0x80 && u[2] == '\0') {
+    const uint32_t cp = (static_cast<uint32_t>(u[0] & 0x1F) << 6) | (u[1] & 0x3F);
+    // Α〜Ω・α〜ω（0x3A2 は欠番、0x3AA/0x3AB は Ϊ/Ϋ）
+    return cp >= 0x0391 && cp <= 0x03C9 && cp != 0x03A2 && cp != 0x03AA && cp != 0x03AB;
+  }
+  return false;
+}
+
 // 縦書きでも正立させる記号。ローマ数字（Ⅰ〜Ⅻ・ⅰ〜ⅹ）と囲み数字（①〜⑳・Ⓐ など）。
 // 全角の1字として組む字なので、横倒し（Sideways）にすると読めない。
 // パーサ側（ChapterHtmlSlimParser）はこの範囲を縦書きのときだけ1字ずつの語に分ける。

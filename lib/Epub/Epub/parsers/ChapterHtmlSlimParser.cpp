@@ -219,17 +219,10 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   // リストマーカーの直後の語は必ずくっつける（マーカーと本文の間で折り返さない）
   const bool attachToPrevious = nextWordContinues || listMarkerPending;
   if (verticalMode) {
-    // Classify for vertical: count ASCII digits to determine TateChuYoko vs Sideways
-    bool allDigits = true;
-    int asciiCharCount = 0;
-    for (int ci = 0; ci < partWordBufferIndex; ci++) {
-      if ((static_cast<uint8_t>(partWordBuffer[ci]) & 0xC0) != 0x80) asciiCharCount++;
-      if (partWordBuffer[ci] < '0' || partWordBuffer[ci] > '9') allDigits = false;
-    }
-    auto vb = VerticalTextUtils::VerticalBehavior::Sideways;  // default for Latin text
-    if (allDigits && asciiCharCount <= 2) {
-      vb = VerticalTextUtils::VerticalBehavior::TateChuYoko;
-    }
+    // 縦書きの分類: 1〜2 桁の数字と英字 1 字は縦中横（正立）、それ以外のラテン文字は横倒し
+    const auto vb = VerticalTextUtils::isTateChuYokoWord(partWordBuffer)
+                        ? VerticalTextUtils::VerticalBehavior::TateChuYoko
+                        : VerticalTextUtils::VerticalBehavior::Sideways;
     currentTextBlock->addWord(partWordBuffer, fontStyle, vb, false, attachToPrevious, pendingSpace);
   } else {
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, attachToPrevious, pendingSpace);

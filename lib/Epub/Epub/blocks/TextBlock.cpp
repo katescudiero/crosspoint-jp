@@ -159,13 +159,7 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
       } else if (isSingleCjk) {
         renderer.drawTextVertical(wordFontId, wx, wy, w, true, currentStyle);
       } else {
-        bool allDigits = true;
-        int asciiCount = 0;
-        for (const char* c = w; *c; c++) {
-          if ((static_cast<uint8_t>(*c) & 0xC0) != 0x80) asciiCount++;
-          if (*c < '0' || *c > '9') allDigits = false;
-        }
-        if (allDigits && asciiCount <= 2) {
+        if (VerticalTextUtils::isTateChuYokoWord(w)) {
           // TateChuYoko: draw horizontally, centered in the column
           const int textW = renderer.getTextAdvanceX(wordFontId, w, currentStyle);
           const int centerOffset = (columnWidth - textW) / 2;
