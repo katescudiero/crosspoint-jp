@@ -60,6 +60,17 @@ class ChapterHtmlSlimParser {
   // 縦組みの列間のアキ（CSS の margin/padding-right・left）。ブロックの前（右）側は列を置く前に、
   // 後ろ（左）側は次のブロックの前側と重ねて（大きいほう）次の列の位置に反映する。
   int16_t verticalPendingGapAfter = 0;
+  // 縦組みで、<div> などの入れ物に付いた列頭・列末の余白（margin/padding-top・bottom）。
+  // 入れ物の最初の子は空ブロックへの合流で余白を引き継ぐが、2 つ目以降の子は引き継がないので、
+  // 子のブロックを作るたびにここから足す（例: 岩波文庫の .note の margin-top: 3.1em）。
+  struct ContainerInset {
+    int depth;
+    int16_t top;
+    int16_t bottom;
+  };
+  static constexpr int MAX_CONTAINER_INSETS = 6;
+  ContainerInset containerInsets[MAX_CONTAINER_INSETS] = {};
+  int containerInsetCount = 0;
   bool verticalGapBeforeDone = false;
   // Ruby text state
   bool inRuby = false;

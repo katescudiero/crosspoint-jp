@@ -395,6 +395,23 @@ void ParsedText::layoutVerticalColumns(const GfxRenderer& renderer, const int fo
     }
   }
 
+  // 原文で語の間に空白があったぶんの送り（"The Role of Somatic Change" の語間など）。
+  // 横組みは語間を足しているが、縦組みは語の高さしか見ていなかったので、倒して並べた英語が
+  // 語間なしで詰まって読みにくかった。空白は直前の語の送りに足す（語の描画位置は変えない）。
+  // 入れるのは前後とも横倒し・縦中横の語（英語どうし）のときだけ。日本語の本文は XHTML の改行などで
+  // 原文に空白が紛れていることがあり、CJK の間に入れると不自然な空きになる。
+  if (!wordSpaceBefore.empty() && wordVerticalBehaviors.size() >= words.size()) {
+    int spaceAdvance = renderer.getTextAdvanceX(fontId, " ", EpdFontFamily::REGULAR);
+    if (spaceAdvance <= 0) spaceAdvance = cjkCharAdvance / 3;
+    const size_t spaceCount = std::min(wordSpaceBefore.size(), words.size());
+    for (size_t i = 1; i < spaceCount; i++) {
+      if (wordSpaceBefore[i] && wordVerticalBehaviors[i] != VerticalTextUtils::VerticalBehavior::Upright &&
+          wordVerticalBehaviors[i - 1] != VerticalTextUtils::VerticalBehavior::Upright) {
+        wordHeights[i - 1] = static_cast<uint16_t>(wordHeights[i - 1] + spaceAdvance);
+      }
+    }
+  }
+
   // 列頭・列末の余白。縦組みの margin-top / padding-top は列の頭の字下げ、margin-bottom /
   // padding-bottom は列末の字上げになる（岩波文庫の .start-Nem / .end-Nem など）。
   // 字下げで列が潰れないよう、字を 2 つ置けないほど大きい指定は無視する。

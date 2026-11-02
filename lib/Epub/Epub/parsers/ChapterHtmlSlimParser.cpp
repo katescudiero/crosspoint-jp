@@ -296,7 +296,17 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
-  currentTextBlock.reset(new ParsedText(hyphenationEnabled, blockStyle, firstLineIndent));
+  BlockStyle newBlockStyle = blockStyle;
+  if (verticalMode) {
+    // 入れ物（div など）の列頭・列末の余白を、2 つ目以降の子にも足す。入れ物自身のブロック
+    // （entry.depth == depth）と、空ブロックへ合流する最初の子（この分岐を通らない）は除く。
+    for (int i = 0; i < containerInsetCount; i++) {
+      if (containerInsets[i].depth >= depth) continue;
+      newBlockStyle.marginTop = static_cast<int16_t>(newBlockStyle.marginTop + containerInsets[i].top);
+      newBlockStyle.marginBottom = static_cast<int16_t>(newBlockStyle.marginBottom + containerInsets[i].bottom);
+    }
+  }
+  currentTextBlock.reset(new ParsedText(hyphenationEnabled, newBlockStyle, firstLineIndent));
   wordsExtractedInBlock = 0;
   verticalGapBeforeDone = false;
 }
@@ -873,6 +883,18 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   const auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
 
+  // 縦組みの入れ物（div / blockquote / section）の列頭・列末の余白を覚えておく（上の ContainerInset 参照）
+  if (self->verticalMode &&
+      (strcmp(name, "div") == 0 || strcmp(name, "blockquote") == 0 || strcmp(name, "section") == 0) &&
+      self->containerInsetCount < ChapterHtmlSlimParser::MAX_CONTAINER_INSETS) {
+    const auto top = static_cast<int16_t>(userAlignmentBlockStyle.marginTop + userAlignmentBlockStyle.paddingTop);
+    const auto bottom =
+        static_cast<int16_t>(userAlignmentBlockStyle.marginBottom + userAlignmentBlockStyle.paddingBottom);
+    if (top != 0 || bottom != 0) {
+      self->containerInsets[self->containerInsetCount++] = {self->depth, top, bottom};
+    }
+  }
+
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle = BlockStyle::fromCssStyle(
@@ -1438,6 +1460,11 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       willPopStyleStack || willClearBold || willClearItalic || willClearUnderline || willClearScript;
   const bool headerOrBlockTag = isHeaderOrBlock(name);
   const bool tableStructuralTag = isTableStructuralTag(name);
+
+  // 入れ物の余白を戻す（この要素自身の深さは depth - 1）
+  if (self->containerInsetCount > 0 && self->containerInsets[self->containerInsetCount - 1].depth == self->depth - 1) {
+    self->containerInsetCount--;
+  }
 
   // <ol> / <ul> のネストを戻す。depth はまだ減っていないので、この要素自身の深さは
   // depth - 1。startElement が push を飛ばす条件（skip の内側）と対称にする。

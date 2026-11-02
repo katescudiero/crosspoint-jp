@@ -480,6 +480,11 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
       }
     }
 
+    // 本の文書で使われていない tag / class の規則は、メモリに載せる前に捨てる
+    if (parseUsage_ != nullptr && !parseUsage_->matches(key)) {
+      continue;
+    }
+
     // Skip if this would exceed the rule limit
     if (rulesBySelector_.size() >= MAX_RULES) {
       LOG_DBG("CSS", "Reached max rules limit, stopping selector processing");

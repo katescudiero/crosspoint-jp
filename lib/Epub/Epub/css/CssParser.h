@@ -33,7 +33,7 @@ class CssSelectorUsage;
 class CssParser {
  public:
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
-  static constexpr uint8_t CSS_CACHE_VERSION = 6;
+  static constexpr uint8_t CSS_CACHE_VERSION = 7;
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;
@@ -61,6 +61,15 @@ class CssParser {
    * @param classAttr The class attribute value (may contain multiple space-separated classes)
    * @return Combined style with all applicable rules merged
    */
+  /**
+   * Parse-time filter: while set, loadFromStream() registers only rules whose tag/class can match the
+   * documents summarised in `usage`. Generic publisher stylesheets (e.g. the Iwanami / EBPAJ templates)
+   * define ~1000 selectors of which a book uses a few dozen; holding them all in the selector map at
+   * once costs ~150 KB of heap and can hit the low-heap abort path. The pointer is not owned and must
+   * outlive the parse; pass nullptr to clear.
+   */
+  void setParseUsageFilter(const CssSelectorUsage* usage) { parseUsage_ = usage; }
+
   [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
                                       bool vertical = false) const;
 
@@ -120,6 +129,7 @@ class CssParser {
   bool validateCache() const;
 
  private:
+  const CssSelectorUsage* parseUsage_ = nullptr;
   // Storage: maps normalized selector -> style properties
   std::unordered_map<std::string, CssStyle> rulesBySelector_;
 

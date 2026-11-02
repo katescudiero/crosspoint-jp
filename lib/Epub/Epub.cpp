@@ -7,6 +7,7 @@
 #include <PngToBmpConverter.h>
 #include <ZipFile.h>
 
+#include "Epub/css/CssSelectorUsage.h"
 #include "Epub/parsers/ContainerParser.h"
 #include "Epub/parsers/ContentOpfParser.h"
 #include "Epub/parsers/TocNavParser.h"
@@ -278,6 +279,35 @@ void Epub::parseCssFiles() const {
   // Heap-related truncation is transient: if it happens, skip saving the
   // cache so a later session with more free heap rebuilds it completely.
   bool cssComplete = true;
+
+  // 先に全章の tag / class 名を集め、使われている規則だけを解析中に保持する。
+  // 岩波文庫のような出版社共通の CSS は 1000 近いセレクタを持ち、全部を一度に持つと
+  // ~150KB のヒープを食って低ヒープ打ち切り（→ キャッシュ不保存 → CSS が全く効かない）になる。
+  // 集計が途中で失敗したときは絞り込まず、従来どおり全部読む。
+  CssSelectorUsage usage;
+  if (!cssFiles.empty()) {
+    bool usageComplete = true;
+    const int spineCount = getSpineItemsCount();
+    const auto tmpScanPath = getCachePath() + "/.tmp_css_scan.html";
+    for (int i = 0; i < spineCount && usageComplete; i++) {
+      FsFile tmpHtml;
+      if (!Storage.openFileForWrite("EBP", tmpScanPath, tmpHtml)) {
+        usageComplete = false;
+        break;
+      }
+      const bool read = readItemContentsToStream(getSpineItem(i).href, tmpHtml, 1024);
+      tmpHtml.close();
+      if (!read || !usage.scanHtmlFile(tmpScanPath)) {
+        usageComplete = false;
+      }
+    }
+    Storage.remove(tmpScanPath.c_str());
+    if (usageComplete) {
+      cssParser->setParseUsageFilter(&usage);
+    } else {
+      LOG_ERR("EBP", "Could not scan spine for CSS usage, loading all CSS rules");
+    }
+  }
   for (const auto& cssPath : cssFiles) {
     LOG_DBG("EBP", "Parsing CSS file: %s", cssPath.c_str());
 
@@ -339,6 +369,7 @@ void Epub::parseCssFiles() const {
   } else if (!cssParser->saveToCache()) {
     LOG_ERR("EBP", "Failed to save CSS rules to cache");
   }
+  cssParser->setParseUsageFilter(nullptr);  // usage はこの関数のローカル
   cssParser->clear();
 
   LOG_DBG("EBP", "Loaded %zu CSS style rules from %zu files", cssParser->ruleCount(), cssFiles.size());
