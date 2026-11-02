@@ -142,8 +142,14 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
       const auto* p = reinterpret_cast<const unsigned char*>(w);
       uint32_t firstCp = utf8NextCodepoint(&p);
       bool isSingleCjk = (firstCp != 0 && *p == '\0' && VerticalTextUtils::isUprightInVertical(firstCp));
+      // 等号・波ダッシュなどは字送りの枠は全角1字のまま、字形を90°倒して描く。
+      // 枠の高さは語の縦書き挙動（Upright）で決まっているので、起点 wy をそのまま使う
+      // （Latin 用の vertShift は不要）。ルビは付けない字なので描画のみ。
+      const bool isRotatedCjk = (isSingleCjk && VerticalTextUtils::isRotatedInVertical(firstCp));
 
-      if (isSingleCjk) {
+      if (isRotatedCjk) {
+        renderer.drawTextSideways(wordFontId, wx, wy, w, true, currentStyle, columnWidth);
+      } else if (isSingleCjk) {
         renderer.drawTextVertical(wordFontId, wx, wy, w, true, currentStyle);
         // 縦書きルビ描画（親文字の右側）
         if (rubyFontId != 0 && i < rubyTexts.size() && !rubyTexts[i].empty()) {
