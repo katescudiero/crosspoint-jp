@@ -32,7 +32,8 @@ namespace {
 // Version 42: <pre> の上下のアキを最初の行と最後の行だけに寄せる（CSS の padding が行ごとに
 //             掛かって 1 行おきに空き、枠が途切れていた）。同じくレイアウト結果のみの変更。
 // Version 43: 縦書きのローマ数字・囲み数字を1字ずつの正立語にする（語の分割と向きが変わる）。
-constexpr uint8_t SECTION_FILE_VERSION = 43;
+// Version 44: 縦書きのルビを熟語単位で持つ（先頭語に全文、2 語目以降は継続マーク）。
+constexpr uint8_t SECTION_FILE_VERSION = 44;
 // Minimum free heap required before attempting to build section pages.
 // Section building involves heavy allocations (Page, TextBlock, PageLine, etc.)
 // and on ESP32 without C++ exceptions, allocation failure calls abort().

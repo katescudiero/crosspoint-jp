@@ -261,8 +261,10 @@ class GfxRenderer {
                            EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
 
   // Helper for drawing vertical text (top-to-bottom, for tategaki)
+  // spacingPercent: 字間（%）。負のとき（既定）は setVerticalCharSpacing の値を使う。
+  // ルビのように本文の字間設定に左右されたくない描画では 0 などを明示する。
   void drawTextVertical(int fontId, int x, int y, const char* text, bool black = true,
-                        EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+                        EpdFontFamily::Style style = EpdFontFamily::REGULAR, int spacingPercent = -1) const;
 
   // Draw text rotated 90° CW, progressing top-to-bottom (for Sideways words in vertical text)
   // columnWidth: the CJK column width to center the rotated text within (0 = no centering)

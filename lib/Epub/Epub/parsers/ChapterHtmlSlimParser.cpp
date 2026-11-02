@@ -1503,7 +1503,16 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   if (strcmp(name, "ruby") == 0 && self->inRuby && self->currentTextBlock) {
     const int currentWordCount = static_cast<int>(self->currentTextBlock->size());
     const int baseWordCount = currentWordCount - self->rubyStartWordIndex;
-    if (baseWordCount > 0 && !self->rubyTextBuffer.empty()) {
+    if (baseWordCount > 0 && !self->rubyTextBuffer.empty() && self->verticalMode) {
+      // 縦書き: 熟語単位で持つ。先頭語にルビ全文、2 語目以降は継続マーク。
+      // （均等に割って各字に振ると、親文字より長いルビが隣の字のルビと重なる。TextBlock 側で
+      //  親文字列の中央に置き、はみ出しは前後にかぶせる。）継続マークは SSO に収まりヒープを使わない。
+      self->currentTextBlock->setRubyForWordAt(self->rubyStartWordIndex, self->rubyTextBuffer);
+      for (int i = 1; i < baseWordCount; i++) {
+        self->currentTextBlock->setRubyForWordAt(self->rubyStartWordIndex + i,
+                                                 std::string(1, VerticalTextUtils::RUBY_CONTINUATION));
+      }
+    } else if (baseWordCount > 0 && !self->rubyTextBuffer.empty()) {
       // Count UTF-8 characters in ruby text
       std::vector<size_t> charOffsets;
       const char* p = self->rubyTextBuffer.c_str();

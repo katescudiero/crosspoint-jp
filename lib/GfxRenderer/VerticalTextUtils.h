@@ -11,6 +11,35 @@ enum class VerticalBehavior : uint8_t {
   TateChuYoko,  // 1-2 digit numbers - horizontal-in-vertical
 };
 
+// 縦書きのルビは熟語（<ruby> 1 つぶん）単位で持つ。パーサは親文字の先頭語にルビ全文を、
+// 2 語目以降には次の継続マーク1文字だけを入れる（保存形式は語と並列の文字列のまま）。
+// 描画側（TextBlock）は継続マークの語を先頭語と同じルビの一部として扱い、ルビ本文としては描かない。
+static constexpr char RUBY_CONTINUATION = '\x01';
+inline bool isRubyContinuationMark(const char* s) { return s != nullptr && s[0] == RUBY_CONTINUATION && s[1] == '\0'; }
+
+// 1 つの熟語ルビの縦方向の位置合わせ用。単位は画面の px（上が小さい）。
+struct RubySpan {
+  int baseTop;     // 親文字列の上端
+  int baseBottom;  // 親文字列の下端
+  int rubyLen;     // ルビ文字列の縦の長さ
+  int rubyTop;     // [出力] ルビの上端
+};
+
+// 各ルビを親文字列の中央に置く（中付き）。ルビが親文字列より長いときは上下に同じだけはみ出す
+// （前後の文字にかぶせる）。隣のルビと重なるときだけ、後ろのルビを下へ押し出す。
+// minTop より上には出さない（列の先頭より上に突き出して欠けるのを防ぐ）。
+// spans は親文字列の上端が小さい順（読み順）に並んでいること。
+inline void placeRubySpans(RubySpan* spans, int n, int minTop, int gap) {
+  int prevEnd = minTop;
+  for (int i = 0; i < n; i++) {
+    int top = spans[i].baseTop + ((spans[i].baseBottom - spans[i].baseTop) - spans[i].rubyLen) / 2;
+    if (top < minTop) top = minTop;
+    if (i > 0 && top < prevEnd + gap) top = prevEnd + gap;
+    spans[i].rubyTop = top;
+    prevEnd = top + spans[i].rubyLen;
+  }
+}
+
 // 縦書きでも正立させる記号。ローマ数字（Ⅰ〜Ⅻ・ⅰ〜ⅹ）と囲み数字（①〜⑳・Ⓐ など）。
 // 全角の1字として組む字なので、横倒し（Sideways）にすると読めない。
 // パーサ側（ChapterHtmlSlimParser）はこの範囲を縦書きのときだけ1字ずつの語に分ける。

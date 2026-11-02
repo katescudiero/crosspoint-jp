@@ -1890,7 +1890,7 @@ int GfxRenderer::getTextHeight(const int fontId) const {
 }
 
 void GfxRenderer::drawTextVertical(const int fontId, const int x, const int y, const char* text, const bool black,
-                                   const EpdFontFamily::Style style) const {
+                                   const EpdFontFamily::Style style, const int spacingPercent) const {
   if (text == nullptr || *text == '\0') return;
 
   // Scan mode: record text for prewarm
@@ -1936,7 +1936,8 @@ void GfxRenderer::drawTextVertical(const int fontId, const int x, const int y, c
     const uint16_t fontScale = getSdCardFontScale(effectiveFontId);
     if (fontScale != 256) advFP = static_cast<int32_t>(static_cast<int64_t>(advFP) * fontScale / 256);
     const int advance = fp4::toPixel(advFP);
-    const int verticalAdvance = advance + advance * verticalCharSpacingPercent_ / 100;
+    const int charSpacingPercent = (spacingPercent >= 0) ? spacingPercent : static_cast<int>(verticalCharSpacingPercent_);
+    const int verticalAdvance = advance + advance * charSpacingPercent / 100;
 
     // Check for vertical substitute glyph (OpenType 'vert' feature).
     // Only apply to punctuation/brackets/long marks — kana and ideographs

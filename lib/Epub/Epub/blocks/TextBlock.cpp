@@ -5,12 +5,22 @@
 #include <Serialization.h>
 #include <Utf8.h>
 #include <VerticalTextUtils.h>
+#include <algorithm>
 
 #include "../InlineImage.h"
 #include "ImageBlock.h"
 
 int TextBlock::rubyFontId = 0;
 int TextBlock::smallFontId = 0;
+
+namespace {
+// 2 コードポイント以上の語か（倒して描く英字など、縦の長さが字幅と一致しない語の判定用）
+bool isMultiCodepoint(const std::string& word) {
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(word.c_str());
+  if (utf8NextCodepoint(&p) == 0) return false;
+  return *p != 0;
+}
+}  // namespace
 
 void TextBlock::collectCodepoints(std::vector<uint32_t>& out, size_t max) const {
   if (max == 0 || out.size() >= max) {
@@ -42,7 +52,7 @@ void TextBlock::collectCodepoints(std::vector<uint32_t>& out, size_t max) const 
 
 bool TextBlock::hasRuby() const {
   for (const auto& rt : rubyTexts) {
-    if (!rt.empty()) return true;
+    if (!rt.empty() && !VerticalTextUtils::isRubyContinuationMark(rt.c_str())) return true;
   }
   return false;
 }
@@ -62,7 +72,7 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
   if (rubyFontId != 0 && hasRuby() && renderer.isSdCardFont(rubyFontId)) {
     std::string allRuby;
     for (const auto& rt : rubyTexts) {
-      if (!rt.empty()) allRuby += rt;
+      if (!rt.empty() && !VerticalTextUtils::isRubyContinuationMark(rt.c_str())) allRuby += rt;
     }
     if (!allRuby.empty()) {
       // ルビは常に REGULAR で描画する（下の drawText/drawTextVertical 参照）。
@@ -123,11 +133,7 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
         if (imageX < 0) imageX = 0;
         ImageBlock(imagePath, static_cast<int16_t>(imageWidth), static_cast<int16_t>(imageHeight))
             .render(renderer, imageX, wy);
-        // 画像語に付いたルビ（<ruby><img/><rt>…</rt></ruby>）は通常の縦書きルビと同じ位置に描く
-        if (rubyFontId != 0 && i < rubyTexts.size() && !rubyTexts[i].empty()) {
-          renderer.drawTextVertical(rubyFontId, wx + columnWidth + 2, wy, rubyTexts[i].c_str(), true,
-                                    EpdFontFamily::REGULAR);
-        }
+        // 画像語に付いたルビ（<ruby><img/><rt>…</rt></ruby>）は、下の縦書きルビ描画（熟語単位）で描く
       }
       continue;
     }
@@ -151,11 +157,6 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
         renderer.drawTextSideways(wordFontId, wx, wy, w, true, currentStyle, columnWidth);
       } else if (isSingleCjk) {
         renderer.drawTextVertical(wordFontId, wx, wy, w, true, currentStyle);
-        // 縦書きルビ描画（親文字の右側）
-        if (rubyFontId != 0 && i < rubyTexts.size() && !rubyTexts[i].empty()) {
-          const int rubyX = wx + columnWidth + 2;
-          renderer.drawTextVertical(rubyFontId, rubyX, wy, rubyTexts[i].c_str(), true, EpdFontFamily::REGULAR);
-        }
       } else {
         bool allDigits = true;
         int asciiCount = 0;
@@ -218,6 +219,65 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
         }
 
         renderer.drawLine(startX, underlineY, startX + underlineWidth, underlineY, true);
+      }
+    }
+  }
+
+  // 縦書きルビ（親文字の右側）。熟語（<ruby> 1 つぶん）単位で、親文字列の中央に置く。
+  // パーサは先頭語にルビ全文、2 語目以降に継続マークを入れている（VerticalTextUtils.h）。
+  // ルビが親文字列より長いときは前後の文字にかぶせ、隣のルビと重なるときだけ後ろを下へ押し出す。
+  // ルビの字間は本文の字間設定に左右されないよう 0 で描く（長いルビほど設定で伸びて重なっていた）。
+  if (isVertical && rubyFontId != 0 && !rubyTexts.empty() && wordYpos.size() >= words.size()) {
+    const size_t wc = words.size();
+    const size_t rc = std::min(wc, rubyTexts.size());
+    size_t groupCount = 0;
+    for (size_t i = 0; i < rc; i++) {
+      if (!rubyTexts[i].empty() && !VerticalTextUtils::isRubyContinuationMark(rubyTexts[i].c_str())) groupCount++;
+    }
+    if (groupCount > 0) {
+      // 1 列のルビ数ぶんの一時配列（1 列は高々数十語、描画のあいだだけ保持して関数末で解放）。
+      // スタックだと列の長さに上限が決められず 256 バイトの目安を超えるため vector を使い、reserve で再確保を避ける。
+      std::vector<VerticalTextUtils::RubySpan> spans;
+      std::vector<size_t> heads;
+      spans.reserve(groupCount);
+      heads.reserve(groupCount);
+      const int gapPx = columnWidth * renderer.getVerticalCharSpacing() / 100;  // 本文の字間（レイアウトと同じ式）
+      for (size_t i = 0; i < rc; i++) {
+        if (rubyTexts[i].empty() || VerticalTextUtils::isRubyContinuationMark(rubyTexts[i].c_str())) continue;
+        size_t last = i;
+        while (last + 1 < rc && VerticalTextUtils::isRubyContinuationMark(rubyTexts[last + 1].c_str())) last++;
+
+        VerticalTextUtils::RubySpan span{};
+        span.baseTop = y + wordYpos[i];
+        if (last + 1 < wc) {
+          // 次の語の手前（字間ぶんを除く）まで
+          span.baseBottom = y + wordYpos[last + 1] - gapPx;
+        } else {
+          // 列の最後の語: 語の縦の長さを見積もる。画像語は画像の高さ、1 字は字幅、
+          // 倒して描く英字などは文字列の送り幅。
+          int lastHeight = columnWidth;
+          std::string imagePath;
+          int imageWidth = 0;
+          int imageHeight = 0;
+          if (InlineImage::isInlineImage(words[last]) &&
+              InlineImage::decode(words[last], imagePath, imageWidth, imageHeight)) {
+            lastHeight = imageHeight;
+          } else if (isMultiCodepoint(words[last])) {
+            lastHeight = renderer.getTextAdvanceX(effectiveFontId, words[last].c_str(), wordStyles[last]);
+          }
+          span.baseBottom = y + wordYpos[last] + lastHeight;
+        }
+        if (span.baseBottom < span.baseTop) span.baseBottom = span.baseTop;
+        span.rubyLen = renderer.getTextAdvanceX(rubyFontId, rubyTexts[i].c_str(), EpdFontFamily::REGULAR);
+        spans.push_back(span);
+        heads.push_back(i);
+      }
+      VerticalTextUtils::placeRubySpans(spans.data(), static_cast<int>(spans.size()), y, 1);
+      for (size_t k = 0; k < spans.size(); k++) {
+        const size_t head = heads[k];
+        const int rubyX = x + wordXpos[head] + columnWidth + 2;
+        renderer.drawTextVertical(rubyFontId, rubyX, spans[k].rubyTop, rubyTexts[head].c_str(), true,
+                                  EpdFontFamily::REGULAR, 0);
       }
     }
   }
