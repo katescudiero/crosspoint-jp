@@ -11,9 +11,19 @@ enum class VerticalBehavior : uint8_t {
   TateChuYoko,  // 1-2 digit numbers - horizontal-in-vertical
 };
 
+// 縦書きでも正立させる記号。ローマ数字（Ⅰ〜Ⅻ・ⅰ〜ⅹ）と囲み数字（①〜⑳・Ⓐ など）。
+// 全角の1字として組む字なので、横倒し（Sideways）にすると読めない。
+// パーサ側（ChapterHtmlSlimParser）はこの範囲を縦書きのときだけ1字ずつの語に分ける。
+inline bool isUprightSymbolInVertical(uint32_t cp) {
+  if (cp >= 0x2160 && cp <= 0x2188) return true;  // Number Forms: ローマ数字
+  if (cp >= 0x2460 && cp <= 0x24FF) return true;  // Enclosed Alphanumerics: ①〜⑳ など
+  return false;
+}
+
 // Determine if a codepoint should be drawn upright in vertical text.
 // CJK ideographs, kana, CJK symbols, fullwidth forms, etc.
 inline bool isUprightInVertical(uint32_t cp) {
+  if (isUprightSymbolInVertical(cp)) return true;
   if (cp >= 0x4E00 && cp <= 0x9FFF) return true;  // CJK Unified Ideographs
   if (cp >= 0x3400 && cp <= 0x4DBF) return true;  // CJK Extension A
   if (cp >= 0x3040 && cp <= 0x309F) return true;  // Hiragana

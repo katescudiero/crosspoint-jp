@@ -9,6 +9,7 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "FontCacheManager.h"
 #include "VerticalTextUtils.h"
@@ -1954,17 +1955,62 @@ void GfxRenderer::drawTextVertical(const int fontId, const int x, const int y, c
       // Render vert substitute glyph using the font's designed left/top offsets.
       // These encode correct vertical typography positioning:
       //   。、→ 右寄り、「→ セル下部、」→ セル上部、ー→ 中央
-      const int drawX = x + vertGlyph->left;
-      const int drawY = yPos + ascender - vertGlyph->top;
+      //
+      // SD カードフォントは1つのファイルを拡大縮小して各ポイント数にしている
+      // （SdCardFontManager.cpp）。ルビ（8pt）などは縮小率が 256 未満になる。
+      // 縦書き用字形もこの縮小率で寸法・オフセットを縮める（以前は縮めず、ルビの「ー」「、」が
+      // 本文と同じ大きさで描かれていた）。縮小率が 256 のときは従来と同じ値になる。
+      const bool vScaled = (fontScale != 256);
+      const int srcW = vertGlyph->width;
+      const int srcH = vertGlyph->height;
+      int dstW = vScaled ? ((srcW * fontScale + 128) >> 8) : srcW;
+      int dstH = vScaled ? ((srcH * fontScale + 128) >> 8) : srcH;
+      if (dstW < 1) dstW = 1;  // 細い字形が縮小で消えないようにする
+      if (dstH < 1) dstH = 1;
+      const int vLeft = vScaled ? ((vertGlyph->left * static_cast<int>(fontScale) + 128) >> 8) : vertGlyph->left;
+      const int vTop = vScaled ? ((vertGlyph->top * static_cast<int>(fontScale) + 128) >> 8) : vertGlyph->top;
+      const int vAscender = vScaled ? ((ascender * static_cast<int>(fontScale) + 128) >> 8) : ascender;
+      const int drawX = x + vLeft;
+      const int drawY = yPos + vAscender - vTop;
 
-      int pixelPosition = 0;
-      for (int glyphY = 0; glyphY < vertGlyph->height; glyphY++) {
+      // 縮小時は元画素 [dst*256/scale, (dst+1)*256/scale) を面積平均する（renderChar と同じ方式）。
+      const auto srcSpan = [fontScale](const int dst, const int limit) {
+        const int from = dst * 256 / fontScale;
+        int to = (dst + 1) * 256 / fontScale;
+        if (to <= from) to = from + 1;
+        return std::make_pair(from < limit ? from : limit - 1, to > limit ? limit : to);
+      };
+
+      for (int glyphY = 0; glyphY < dstH; glyphY++) {
         const int screenY = drawY + glyphY;
-        for (int glyphX = 0; glyphX < vertGlyph->width; glyphX++, pixelPosition++) {
+        int srcY0 = glyphY;
+        int srcY1 = glyphY + 1;
+        if (vScaled) {
+          const auto spanY = srcSpan(glyphY, srcH);
+          srcY0 = spanY.first;
+          srcY1 = spanY.second;
+        }
+        for (int glyphX = 0; glyphX < dstW; glyphX++) {
           const int screenX = drawX + glyphX;
-          const uint8_t byte = vertBitmap[pixelPosition >> 2];
-          const uint8_t bit_index = (3 - (pixelPosition & 3)) * 2;
-          const uint8_t bmpVal = 3 - ((byte >> bit_index) & 0x3);
+          int srcX0 = glyphX;
+          int srcX1 = glyphX + 1;
+          if (vScaled) {
+            const auto spanX = srcSpan(glyphX, srcW);
+            srcX0 = spanX.first;
+            srcX1 = spanX.second;
+          }
+
+          uint32_t inkSum = 0;
+          uint32_t count = 0;
+          for (int sy = srcY0; sy < srcY1; sy++) {
+            for (int sx = srcX0; sx < srcX1; sx++) {
+              const int pp = sy * srcW + sx;
+              inkSum += (vertBitmap[pp >> 2] >> ((3 - (pp & 3)) * 2)) & 0x3;
+              count++;
+            }
+          }
+          if (count == 0) continue;
+          const uint8_t bmpVal = static_cast<uint8_t>(3 - (inkSum + count / 2) / count);
 
           if (renderMode == BW && isGlyphInk(bmpVal)) {
             drawPixel(screenX, screenY, black);
