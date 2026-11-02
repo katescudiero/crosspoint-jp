@@ -45,7 +45,10 @@ constexpr size_t MAX_RULES = 1500;
 
 // Minimum free heap required to apply CSS during rendering
 // If below this threshold, we skip CSS to avoid display artifacts.
-constexpr size_t MIN_FREE_HEAP_FOR_CSS = 48 * 1024;
+// resolveStyle が確保するのは小さな std::string と vector だけ（数百バイト）なので、
+// 章の組版中（開始時の必要ヒープが 50KB）に常時割り込まないよう 16KB にしている。
+// 以前の 48KB だと、組版が進んでヒープが 48KB を割った時点から CSS が丸ごと無視されていた。
+constexpr size_t MIN_FREE_HEAP_FOR_CSS = 16 * 1024;
 
 // Minimum free heap required to keep registering rules while parsing CSS or
 // loading the rules cache. The project builds with -fno-exceptions, so a
@@ -400,6 +403,7 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
   // rulesBySelector_ would abort() on allocation failure (-fno-exceptions).
   if (ESP.getFreeHeap() < MIN_FREE_HEAP_DURING_CSS_PARSE) {
     LOG_DBG("CSS", "Low heap (%u bytes), dropping CSS rule registration", ESP.getFreeHeap());
+    parseTruncated_ = true;  // 規則が欠けたままキャッシュに保存させない
     return;
   }
 
@@ -502,6 +506,9 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
 }
 
 // Main parsing entry point
+
+uint32_t CssParser::diagLowHeapSkips = 0;
+uint32_t CssParser::diagCacheLoadedRules = 0;
 
 bool CssParser::loadFromStream(FsFile& source) {
   if (!source) {
@@ -609,6 +616,7 @@ bool CssParser::loadFromStream(FsFile& source) {
     if (ESP.getFreeHeap() < MIN_FREE_HEAP_DURING_CSS_PARSE) {
       LOG_ERR("CSS", "Low heap during CSS parse (%u bytes), stopping early with %zu rules", ESP.getFreeHeap(),
               rulesBySelector_.size());
+      parseTruncated_ = true;
       return false;
     }
 
@@ -656,7 +664,7 @@ bool CssParser::loadFromStream(FsFile& source) {
   }
 
   LOG_DBG("CSS", "Parsed %zu rules from %zu bytes", rulesBySelector_.size(), totalRead);
-  return true;
+  return !parseTruncated_;
 }
 
 // Style resolution
@@ -664,6 +672,7 @@ bool CssParser::loadFromStream(FsFile& source) {
 CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& classAttr, const bool vertical) const {
   static bool lowHeapWarningLogged = false;
   if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_CSS) {
+    ++diagLowHeapSkips;
     if (!lowHeapWarningLogged) {
       lowHeapWarningLogged = true;
       LOG_DBG("CSS", "Warning: low heap (%u bytes) below MIN_FREE_HEAP_FOR_CSS (%u), returning empty style",
@@ -739,6 +748,10 @@ void CssParser::deleteCache() const {
 
 bool CssParser::saveToCache() const {
   if (cachePath.empty()) {
+    return false;
+  }
+  if (parseTruncated_) {
+    LOG_ERR("CSS", "Rules were dropped under low heap, refusing to save a partial cache");
     return false;
   }
 
@@ -889,6 +902,7 @@ bool CssParser::loadFromCache(const CssSelectorUsage* usage) {
     if (ESP.getFreeHeap() < MIN_FREE_HEAP_DURING_CSS_PARSE) {
       LOG_ERR("CSS", "Low heap while loading CSS cache (%u bytes), stopping early with %zu rules", ESP.getFreeHeap(),
               rulesBySelector_.size());
+      diagCacheLoadedRules = static_cast<uint32_t>(rulesBySelector_.size());
       return true;
     }
 
@@ -1011,6 +1025,7 @@ bool CssParser::loadFromCache(const CssSelectorUsage* usage) {
     rulesBySelector_[selector] = style;
   }
 
+  diagCacheLoadedRules = static_cast<uint32_t>(rulesBySelector_.size());
   LOG_DBG("CSS", "Loaded %zu of %u cached rules%s", rulesBySelector_.size(), ruleCount,
           usage != nullptr ? " (usage-filtered)" : "");
   return true;

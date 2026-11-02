@@ -33,12 +33,13 @@ namespace {
 //             掛かって 1 行おきに空き、枠が途切れていた）。同じくレイアウト結果のみの変更。
 // Version 43: 縦書きのローマ数字・囲み数字を1字ずつの正立語にする（語の分割と向きが変わる）。
 // Version 48: 縦書きで英語の語間を空ける。div の列頭・列末の余白を 2 つ目以降の子にも足す。
+// Version 49: CSS を低ヒープで無視していた不具合の修正（古い章キャッシュは CSS 抜けで作られている）。
 // Version 47: 縦書きで margin/padding-right・left を列間のアキ（見出しの前後など）として入れる。
 // Version 46: 縦書きで CSS の margin/padding-top・bottom と text-indent を列頭・列末の余白に使う
 //             （祖先クラス付きセレクタ ".vrtl .x" も読む）。
 // Version 45: 縦書きで英字 1 字（「（a）」の a など）を縦中横（正立）に分類する。
 // Version 44: 縦書きのルビを熟語単位で持つ（先頭語に全文、2 語目以降は継続マーク）。
-constexpr uint8_t SECTION_FILE_VERSION = 48;
+constexpr uint8_t SECTION_FILE_VERSION = 49;
 // Minimum free heap required before attempting to build section pages.
 // Section building involves heavy allocations (Page, TextBlock, PageLine, etc.)
 // and on ESP32 without C++ exceptions, allocation failure calls abort().

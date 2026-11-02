@@ -1,6 +1,7 @@
 #include "EpubReaderActivity.h"
 
 #include <Epub/InlineImage.h>
+#include <Epub/css/CssParser.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -1030,6 +1031,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // ステータスバーはグレーパスで描き直さないので常に Sharp で描く
   renderer.setGlyphInk(GfxRenderer::GlyphInk::Sharp);
   renderStatusBar();
+  if (SETTINGS.debugDisplay) {
+    // 読書画面の診断（シリアルが取れない実機用）。CSS が低ヒープで無視されていないかを数値で見る。
+    // skip=CSS を無視した回数 / rules=読み込めた規則数 / H=現在の空き / min=起動後の最小（KB）
+    // 固定長のスタックバッファ 96B（<256B）。1 ページ 1 回しか描かない。
+    char dbg[96];
+    snprintf(dbg, sizeof(dbg), "%s skip:%u rules:%u H:%uk min:%uk", CROSSPOINT_VERSION,
+             static_cast<unsigned>(CssParser::diagLowHeapSkips), static_cast<unsigned>(CssParser::diagCacheLoadedRules),
+             static_cast<unsigned>(ESP.getFreeHeap() / 1024),
+             static_cast<unsigned>(esp_get_minimum_free_heap_size() / 1024));
+    renderer.fillRect(0, 0, renderer.getScreenWidth(), 22, false);
+    renderer.drawText(SETTINGS.getReaderFontId(verticalMode), 4, 2, dbg, true);
+  }
   const auto tBwRender = millis();
 
   if (imagePageWithAA) {
