@@ -167,6 +167,18 @@ bool isTableStructuralTag(const char* name) {
   return strcmp(name, "table") == 0 || strcmp(name, "tr") == 0 || strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
 }
 
+void ChapterHtmlSlimParser::applyDecoration(StyleStackEntry& entry, const CssStyle& style) {
+  if (!style.hasTextDecoration()) return;
+  if (style.textDecoration == CssTextDecoration::Emphasis) {
+    // 傍点は下線とは独立。外側の下線を打ち消さない
+    entry.hasEmphasis = true;
+    entry.emphasis = true;
+  } else {
+    entry.hasUnderline = true;
+    entry.underline = style.textDecoration == CssTextDecoration::Underline;
+  }
+}
+
 // Update effective bold/italic/underline based on block style and inline style stack
 void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // Start with block-level styles
@@ -174,6 +186,8 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   effectiveItalic = currentCssStyle.hasFontStyle() && currentCssStyle.fontStyle == CssFontStyle::Italic;
   effectiveUnderline =
       currentCssStyle.hasTextDecoration() && currentCssStyle.textDecoration == CssTextDecoration::Underline;
+  effectiveEmphasis =
+      currentCssStyle.hasTextDecoration() && currentCssStyle.textDecoration == CssTextDecoration::Emphasis;
 
   // Apply inline style stack in order
   for (const auto& entry : inlineStyleStack) {
@@ -185,6 +199,9 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     }
     if (entry.hasUnderline) {
       effectiveUnderline = entry.underline;
+    }
+    if (entry.hasEmphasis) {
+      effectiveEmphasis = entry.emphasis;
     }
   }
 }
@@ -208,6 +225,9 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   }
   if (isUnderline) {
     fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::UNDERLINE);
+  }
+  if (effectiveEmphasis) {
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::EMPHASIS);
   }
   // <sub> が <sup> の内側にあるような壊れた入れ子では上付きを優先する
   if (isSuperscript) {
@@ -1079,10 +1099,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       entry.hasItalic = true;
       entry.italic = cssStyle.fontStyle == CssFontStyle::Italic;
     }
-    if (cssStyle.hasTextDecoration()) {
-      entry.hasUnderline = true;
-      entry.underline = cssStyle.textDecoration == CssTextDecoration::Underline;
-    }
+    applyDecoration(entry, cssStyle);
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
@@ -1101,10 +1118,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       entry.hasBold = true;
       entry.bold = cssStyle.fontWeight == CssFontWeight::Bold;
     }
-    if (cssStyle.hasTextDecoration()) {
-      entry.hasUnderline = true;
-      entry.underline = cssStyle.textDecoration == CssTextDecoration::Underline;
-    }
+    applyDecoration(entry, cssStyle);
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
@@ -1125,10 +1139,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         entry.hasItalic = true;
         entry.italic = cssStyle.fontStyle == CssFontStyle::Italic;
       }
-      if (cssStyle.hasTextDecoration()) {
-        entry.hasUnderline = true;
-        entry.underline = cssStyle.textDecoration == CssTextDecoration::Underline;
-      }
+      applyDecoration(entry, cssStyle);
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
     }

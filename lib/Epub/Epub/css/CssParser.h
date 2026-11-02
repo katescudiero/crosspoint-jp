@@ -33,7 +33,7 @@ class CssSelectorUsage;
 class CssParser {
  public:
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
-  static constexpr uint8_t CSS_CACHE_VERSION = 8;
+  static constexpr uint8_t CSS_CACHE_VERSION = 9;  // 9: text-emphasis-style（傍点）を規則として保持する
 
   // 画面デバッグ用の診断カウンタ（起動後の累計。SETTINGS.debugDisplay の読書画面表示が読む）。
   // 静的な uint32_t 2 つ（DRAM 8 バイト）だけで、ヒープは使わない。

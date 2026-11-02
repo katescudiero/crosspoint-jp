@@ -300,6 +300,14 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
   } else if (propNameBuf == "text-decoration" || propNameBuf == "text-decoration-line") {
     style.textDecoration = interpretDecoration(propValueBuf);
     style.defined.textDecoration = 1;
+  } else if (propNameBuf == "text-emphasis-style" || propNameBuf == "-webkit-text-emphasis-style" ||
+             propNameBuf == "-epub-text-emphasis-style") {
+    // "none" は何も指定しないのと同じ扱い（打ち消しで下線を巻き込まない）。
+    // filled / open / sesame / dot などの種類は区別せず、傍点あり（Emphasis）として扱う。
+    if (propValueBuf.find("none") == std::string::npos) {
+      style.textDecoration = CssTextDecoration::Emphasis;
+      style.defined.textDecoration = 1;
+    }
   } else if (propNameBuf == "text-indent") {
     style.textIndent = interpretLength(propValueBuf);
     style.defined.textIndent = 1;

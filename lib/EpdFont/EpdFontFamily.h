@@ -14,6 +14,7 @@ class EpdFontFamily {
     SUPERSCRIPT = 8,   // <sup>: 小さいフォントで行の上端に寄せて描く
     SUBSCRIPT = 16,    // <sub>: 小さいフォントで行の下端に寄せて描く
     SCRIPT_MASK = 24,  // SUPERSCRIPT | SUBSCRIPT
+    EMPHASIS = 32,     // 傍点（text-emphasis-style）。縦書きの CJK 字だけ描く装飾ビット
   };
 
   // 書体（Regular / Bold / Italic / BoldItalic）の選択に使うビット。

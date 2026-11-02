@@ -100,12 +100,16 @@ class ChapterHtmlSlimParser {
     bool hasBold = false, bold = false;
     bool hasItalic = false, italic = false;
     bool hasUnderline = false, underline = false;
+    bool hasEmphasis = false, emphasis = false;
   };
+  // CSS の text-decoration / text-emphasis-style をスタイル積みの 1 項目へ写す
+  static void applyDecoration(StyleStackEntry& entry, const CssStyle& style);
   std::vector<StyleStackEntry> inlineStyleStack;
   CssStyle currentCssStyle;
   bool effectiveBold = false;
   bool effectiveItalic = false;
   bool effectiveUnderline = false;
+  bool effectiveEmphasis = false;
   // 原文でこの直後の語の前に空白があったか。CJK は 1 文字ずつを語に割る関係で
   // nextWordContinues（＝スペース無しで前の語に続く）では区別できないため別に持つ。
   bool pendingSpace = false;

@@ -11,6 +11,19 @@
 #include "../InlineImage.h"
 #include "ImageBlock.h"
 
+namespace {
+// 傍点を打つ字か。CJK の約物（、。「」など U+3000〜303F）と全角の約物は除く。
+bool isEmphasisTarget(const uint32_t cp) {
+  if (cp >= 0x3000 && cp <= 0x303F) return false;
+  if (cp >= 0xFF01 && cp <= 0xFF0F) return false;
+  if (cp >= 0xFF1A && cp <= 0xFF20) return false;
+  if (cp >= 0xFF3B && cp <= 0xFF40) return false;
+  if (cp >= 0xFF5B && cp <= 0xFF65) return false;
+  if (cp == 0x2014 || cp == 0x2015 || cp == 0x2026 || cp == 0x2025) return false;  // ― … ‥
+  return true;
+}
+}  // namespace
+
 int TextBlock::rubyFontId = 0;
 int TextBlock::smallFontId = 0;
 
@@ -177,6 +190,17 @@ void TextBlock::render(GfxRenderer& renderer, const int fontId, const int x, con
           const int vertShift = renderer.getFontAscenderSize(wordFontId) / 3;
           renderer.drawTextSideways(wordFontId, wx, wy + vertShift, w, true, currentStyle, columnWidth);
         }
+      }
+
+      // 傍点（text-emphasis-style）。縦書きでは字の右側に 1 字 1 点、字の中央の高さに打つ。
+      // ルビと同じ側（列の右）で、ルビの x 位置（wx + columnWidth + 2）に揃える。
+      // 句読点・括弧には打たない（傍点は本来、約物には付けない）。
+      // 字体の選択には使わないビットなので、SD カードフォントの advance にも影響しない。
+      if ((currentStyle & EpdFontFamily::EMPHASIS) != 0 && isSingleCjk && !isRotatedCjk && isEmphasisTarget(firstCp)) {
+        const int dot = columnWidth >= 24 ? 4 : 3;  // 1 字の大きさに対する点の大きさ（px）
+        const int cx = wx + columnWidth + 4;
+        const int cy = wy + columnWidth / 2;
+        renderer.fillRect(cx - dot / 2, cy - dot / 2, dot, dot, true);
       }
     } else {
       const int wordX = wordXpos[i] + x;

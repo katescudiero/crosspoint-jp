@@ -52,7 +52,9 @@ enum class CssFontStyle : uint8_t { Normal = 0, Italic = 1 };
 enum class CssFontWeight : uint8_t { Normal = 0, Bold = 1 };
 
 // Text decoration options
-enum class CssTextDecoration : uint8_t { None = 0, Underline = 1 };
+// Emphasis は text-emphasis-style（傍点）。text-decoration とは別物だが、キャッシュ形式を変えずに
+// 済むよう同じ 1 バイトの値として持つ（同じ規則内で両方を指定した場合は後勝ち）。
+enum class CssTextDecoration : uint8_t { None = 0, Underline = 1, Emphasis = 2 };
 
 // Display options - only None and Block are relevant for e-ink rendering
 enum class CssDisplay : uint8_t { Block = 0, None = 1 };
