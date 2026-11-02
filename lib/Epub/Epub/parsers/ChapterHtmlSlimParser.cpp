@@ -1361,12 +1361,14 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
       for (int j = 0; j < charLen && j < 4; j++) {
         cjkWord[j] = s[i + j];
       }
+      // CJK 字は従来どおり REGULAR で語にする（太字・斜体・下線はここでは付けない）。
+      // 傍点だけは字ごとに打つ必要があるので、EMPHASIS ビットだけ載せる。
+      const auto cjkStyle = self->effectiveEmphasis ? EpdFontFamily::EMPHASIS : EpdFontFamily::REGULAR;
       if (self->verticalMode) {
-        self->currentTextBlock->addWord(cjkWord, EpdFontFamily::REGULAR, VerticalTextUtils::VerticalBehavior::Upright,
-                                        false, self->listMarkerPending, self->pendingSpace);
+        self->currentTextBlock->addWord(cjkWord, cjkStyle, VerticalTextUtils::VerticalBehavior::Upright, false,
+                                        self->listMarkerPending, self->pendingSpace);
       } else {
-        self->currentTextBlock->addWord(cjkWord, EpdFontFamily::REGULAR, false, self->listMarkerPending,
-                                        self->pendingSpace);
+        self->currentTextBlock->addWord(cjkWord, cjkStyle, false, self->listMarkerPending, self->pendingSpace);
       }
       self->pendingSpace = false;
       self->listMarkerPending = false;
