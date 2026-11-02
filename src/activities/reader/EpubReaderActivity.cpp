@@ -1,9 +1,9 @@
 #include "EpubReaderActivity.h"
 
 #include <Epub/InlineImage.h>
-#include <Epub/css/CssParser.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
+#include <Epub/css/CssParser.h>
 #include <FontCacheManager.h>
 #include <FontManager.h>
 #include <FsHelpers.h>

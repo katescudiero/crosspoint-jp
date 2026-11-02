@@ -37,7 +37,7 @@ class CssParser {
 
   // 画面デバッグ用の診断カウンタ（起動後の累計。SETTINGS.debugDisplay の読書画面表示が読む）。
   // 静的な uint32_t 2 つ（DRAM 8 バイト）だけで、ヒープは使わない。
-  static uint32_t diagLowHeapSkips;     // resolveStyle が低ヒープで CSS を無視した回数
+  static uint32_t diagLowHeapSkips;      // resolveStyle が低ヒープで CSS を無視した回数
   static uint32_t diagCacheLoadedRules;  // 直近の loadFromCache で読み込めた規則数
 
   // 低ヒープで規則の登録を捨てたとき true。true のまま saveToCache() してはいけない。
